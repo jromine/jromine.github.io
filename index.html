@@ -2,332 +2,104 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>International GPA Calculator</title>
+<title>John Romine</title>
 
-<link rel="stylesheet" href="https://code.jquery.com/ui/1.14.2/themes/base/jquery-ui.min.css">
-<link rel="stylesheet" href="https://code.jquery.com/ui/1.14.2/themes/base/theme.css">
-
-<script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
-<script type="text/javascript">
-	google.charts.load('current', {'packages':['corechart', 'table'] });
-</script>
-
-<script src="https://code.jquery.com/jquery-3.7.1.min.js" integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=" crossorigin="anonymous"></script>
-<script src="https://code.jquery.com/ui/1.14.2/jquery-ui.min.js" integrity="sha256-mblSWfbYzaq/f+4akyMhE6XELCou4jbkgPv+JQPER2M=" crossorigin="anonymous"></script>
-
-<!-- ON LOAD script type="text/javascript" src=""https://grad.uci.edu/gpa/gpa.json"></script -->
-  
-<script>
-    var gpa_data = []; // global, set once on page load
-	
-	/* Single-page client-side GPA Calculator
-	 *
-	 * Data file is loaded from grad.uci.edu/gpa/gpa.json 
-	 * It appears this is now a static file, in JSONP format,
-	 * with the callback function permanently named 'callback'.
-	 * Query parameters are ignored.
-	 * This data a copy of an earlier site gpa.eng.uci.edu.
-	 *
-	 * jQuery is used for autocomplete, Google Charts for graph
-	 * and DataTable display.
-	 *
-	 * Operation:
-	 *
-	 * Upon page ready, load the JSON file, callback(data) is called,
-	 * the data is saved in gpa_data, and draw_table() is invoked when
-	 * the charts api is fully loaded.
-	 *
-	 * School name can be entered using text autocomplete, or by selecting a
-	 * row in the data table. Once a school is selected, the gpa calcuation
-	 * data are saved, and the calculator is ready for input.  Linear
-	 * interpolation is used to find the US GPA value between the nearest
-	 * correspondent data points.
-	 *
-	 * gpa.json jSONP format:
-	 *   callback({"data":[
-     *     {"value":"Monash University","intl_gpa":"100/80/70/60","us_gpa":"4.0/3.6/3.0/2.0","label":"Monash University S135987"},
-	 *     {"value":"York University","intl_gpa":"9/8/7/6/5/4/3/2","us_gpa":"4.0/3.7/3.3/3.0/2.7/2.5/2.0/1.7","label":"York University "},
-	 *	   ... 
-	 *     ]
-	 *   });
-	 * The original data also had fields for School Code, Country, 
-	 * Location, Notes. These data fields are now lost.
-	 */	 
-	 
-	// load gpa.json after page is ready; when loaded, callback() is run
-	document.addEventListener('DOMContentLoaded', function () {
-		var script = document.createElement("script");
-		script.setAttribute("src", "https://grad.uci.edu/gpa/gpa.json");
-		script.setAttribute("type", "text/javascript");
-		document.head.appendChild(script);
-	}, false);
-	
-	// callback from grad.uci.edu/gpa/gpa.json load
-	function callback(e) {
-		//console.log("callback");
-		gpa_data = e.data || []; // global
-		
-		// call draw_table() after api is loaded
-		google.charts.setOnLoadCallback(function () {
-			draw_table(gpa_data); // draw table after charts is ready
-		});
-		/* GPA data load happens after body is loaded and markup complete
-		 *
-		 * After callback, gpa data is loaded
-		 * Set up autocomplete on school name input. On item select, store intl
-		 * and us gpa values for later use.
-		 */
-		// global element vars
-		var intl_gpa = document.getElementById('intl_gpa');
-		var us_gpa = document.getElementById('us_gpa');
-		var calc_button = document.getElementById('calc_button');
-		var gpa = document.getElementById('gpa'); /* input */
-		var gpa_result = document.getElementById('gpa_result');
-		
-		document.getElementById('calc_school').value = "";
-		gpa.value = "";
-		
-		// autocomplete on school name (1st way to pick school) and 
-		// add "select" handler. item.value is searched, item.label is displayed
-		// https://api.jqueryui.com/autocomplete/
-		var gpa_ac = $('#calc_school').autocomplete({
-			delay: 0,
-			minLength: 3,
-			source: gpa_data,
-			select: function (e, ui) { // selected school name from pop-up list
-				//console.log('autocomplete: select');
-				// store INTL/US GPA data
-				intl_gpa.textContent = ui.item.intl_gpa; // set div text
-				us_gpa.textContent = ui.item.us_gpa;
-				calc_button.disabled = false;
-				draw_chart(intl_gpa.textContent, us_gpa.textContent);
-				gpa.focus();
-				return true;
-			},
-			search: function (e, ui) {
-				// fix bug in jQuery.ui somewhere where menu.bindings just grows and grows
-				// https://bugs.jqueryui.com/ticket/10050?cversion=0&cnum_hist=5#comment:6
-				gpa_ac.data("ui-autocomplete").menu.bindings = $();
-			}
-		});
-
-		// On "Scale GPA" button click, compute and display scaled value.
-		document.getElementById('calc_button').addEventListener('click', function (e) {
-			e.preventDefault();
-			// get stored INTL/US GPA conversion data
-			var intl = intl_gpa.textContent;
-			var us = us_gpa.textContent;
-			var y = gpa.value; // user-entered value
-			if (intl.length > 0 && y.length > 0) {
-				//console.log('gpa: entered: '+y);
-				y = gpa_scale(y, intl.split('/'), us.split('/'));
-				y = isNaN(y) ? '' : y.toFixed(3);
-				//console.log('gpa: computed: '+y);
-				gpa_result.textContent = y;
-			}
-			return false;
-		});
-	}
-	
-	/*
-	 * Draw simple GPA line graph
-	 *
-	 * @param {string} intl - Intl GPA scale points ("100/90/80")
-	 * @param {string} us - US GPA scale points ("4.0/3.0/2.0")
-	 */ 
-	function draw_chart(intl, us) {
-		var data = new google.visualization.DataTable();
-		data.addColumn('number');
-		data.addColumn('number');
-		var intl = intl.split('/');
-		var us = us.split('/');
-		for (var i = 0; i < intl.length; i++) {
-			data.addRow([parseFloat(intl[i]), parseFloat(us[i])]);
-		}
-		var options = {
-			width: 400,
-			height: 200,
-			vAxis: {
-				format: "#.000",
-				viewWindow: {
-					min: 1.0,
-					max: 4.0
-				}
-			},
-			legend: {
-				position: "none"
-			},
-		};
-		var chart = new google.visualization.LineChart(document.getElementById('gpa_chart'));
-		chart.draw(data, options);
-	}
-
-	/*
-	 * Draw schools data table
-	 *
-	 * @param {Array} g - gpa.json data: Array of GPA rows (Objects)
-     */
-	function draw_table(g) {
-		var d = [
-			["School", "Intl GPA", "US GPA"]
-		]; // datatable headings
-		for (var i = 0; i < g.length; i++) {
-			d.push([g[i].value, g[i].intl_gpa, g[i].us_gpa]);
-		}
-		var data = new google.visualization.arrayToDataTable(d, false);
-		var table = new google.visualization.Table(document.getElementById('gpa_table'));
-		table.draw(data, {
-			showRowNumber: true
-		});
-		
-		// on row select (2nd way to pick school), fill school values draw chart
-		// https://developers.google.com/chart/interactive/docs/events
-		google.visualization.events.addListener(table, 'select', function () {
-			var sel = table.getSelection();
-			if (sel.length > 0) {
-				var row = sel[0].row;
-				// fill autocomplete section values
-				document.getElementById('calc_school').value = data.getValue(row, 0);
-				document.getElementById('intl_gpa').textContent = data.getValue(row, 1);
-				document.getElementById('us_gpa').textContent = data.getValue(row, 2);
-				calc_button.disabled = false;
-				draw_chart(data.getValue(row, 1), data.getValue(row, 2));
-				//gpa.focus(); // doesn't work here, see below
-			}
-		});
-		// after row select/click, re-focus on GPA input
-		document.getElementById('gpa_table').addEventListener('click', function (e) {
-			document.getElementById('gpa').focus(); // move focus
-		});
-	}
-	/**
-	 * Helper for gpa_scale()
-	 * interpolate(score = 85, 80, 100, 3.5, 4.0) = 3.625
-	 * https://en.wikipedia.org/wiki/Linear_interpolation
-	 *
-	 * @param {number} x  - the user-entered international score
-	 * @param {number} x0 - lower bound of x (intl) range
-	 * @param {number} x1 - upper bound of x range
-	 * @param {number} y0 - lower bound of y (us) range
-	 * @param {number} y1 - upper bound of y range
-	 * @return {number} scaled GPA score
-	 */
-	function gpa_interpolate(x, x0, x1, y0, y1) {
-		//console.log('interpolate: '+x+' '+x0+' '+x1+' '+y0+' '+y1);
-		return y0 + (x - x0) * ((y1 - y0) / (x1 - x0));
-	};
-	/**
-	 * Interpolate a GPA score using two sets of data points.
-	 *
-	 * We locate the correct interval where the score is found,
-	 * and do linear interpolation to compute the scaled score.
-	 * 
-	 * Updated 05/2026 to handle inverted international scales
-	 * (e.g., 1/2/3/4 => 4/3/2/1); conversions outside the defined
-	 * ranges are undefined. 
-	 * For regular (declining) scales, interpolation toward zero
-	 * at the end of the data range
-	 *
-	 * @param {number} x   - international gpa raw score, ex: 85
-	 * @param {array} intl - array of x data points, ex: [ 100, 90, 80, 70, 60 ]
-	 * @param {array} us   - array of y data points, ex: [ 4.0, 3.6, 3.0, 2.0, 1.0 ]
-	 * @return {number} scaled GPA score
-	 */
-	function gpa_scale(x, intl, us) {
-		if (intl.length < 1 || intl.length != us.length) {
-			console.log('scale length mismatch');
-			return NaN;
-		}
-		var x0 = 0.0;
-		var y0 = 0.0;
-		var x1 = parseFloat(intl[0]); // top of interval
-		var y1 = parseFloat(us[0]);
-		x = parseFloat(x);
-		if (isNaN(x)) {
-			console.log('bad input');
-			return NaN;
-		}
-		var x2;
-		for (i = 1; i < intl.length; i++) {
-			x0 = parseFloat(intl[i]); // bottom of interval
-			y0 = parseFloat(us[i]);
-			if ((x <= x1 && x >= x0) || (x <= x0 && x >= x1)) { // within closed Interval '[x0,x1]'?
-				return gpa_interpolate(x, x0, x1, y0, y1); // done
-			}
-			x2 = x1;
-			x1 = x0;
-			y1 = y0;
-		}
-		if (x2 < x1 || x > x1) { // inverted, out of range
-			return NaN;
-		}
-		// interpolate toward zero
-		// console.log(x+' interpolate toward zero');
-		return gpa_interpolate(x, 0, x1, 0, y1);
-	}
-</script>
 <style>
     body {
 	  margin: 0;
 	  padding: 0;
+	  font-family: Arial, Helvetica, sans-serif;
 	}
-	#heading {
+	#page { 
+	  margin: 1em;
+	}
+	h1, heading {
 	  background: #002466;
 	  color: #fff;
-	  padding: .5em 2em;
+	  padding: 40px 16px;
 	  margin: 0em;
+	  font-size: 3em;
 	}
-	#page { }
-	form {
-	   margin: 1em 2em;
+	h2 { 
+	  font-size: 1.4em;
+	  letter-spacing: 2px;
 	}
-	.form_label, .field_label {
-		font-weight: bold;
+	h3 { 
+		margin: 0em;
+		font-size: 1.1em;
+	}
+	h4 { 
+		font-size: 1em;
+	}
+	ul {
+		margin: .5em 0em;
 	}
 	div {
 		margin: 0.25em 0;
 	}
-	#gpa_result {
-	     min-width: 3em;
-	}
-	#gpa_table th {
-	  text-align: left;
+    	p {
+		font-family: Times New Roman, serif;
 	}
 </style>
 </head>
 <body>
-    <div id="heading">
-        <h1>International GPA Calculator</h1>
-    </div>
-    <div id="page">
-		<form>
-			<label class="form_label school_label" for="calc_school">School:</label>
-			<div>
-				<input type="text" id="calc_school" size="48" class="text" title="Type school name to search">
-			</div>
-			<div>
-				<span class="field_label">Intl: </span><span id="intl_gpa"></span>
-			</div>
-			<div>
-				<span class="field_label">US: </span><span id="us_gpa"></span>
-			</div>
-		
-			<div id="gpa_chart"></div>
-			
-			<div>
-				<label class="form_label gpa_label">Intl GPA:</label>
-				<div>
-					<input id="gpa" type="text" size="6"> = <span id="gpa_result"></span>
-				</div>
-				<div>
-					<button id="calc_button" type="submit" title="Convert International GPA" disabled="disabled">Scale GPA</button>
-				</div>
-			</div>
-		</form>
 
-		<div id="gpa_table"></div>
+<h1>John Romine </h1>
 
-	</div>
-</body>
+<div style="float: right; width: 300px; padding-left: 20px;">
+<img width=300 src="https://lh3.googleusercontent.com/sitesv/AA5AbUArNFMi9poiL4FkdrmDxoviUum7329z2y4ijZW23rKpExugSWlsN8jRrrCc3xcIFppntdrmuq3EPOWuEJl_2J5lEO5gfAYnkobJq9ROyG_0Ihu5zxcWzTnPJY0tG43SKnoD1wPbnGlpvn4zvS6ngMGI2hcC7KS-0B8aGNIkhVlcul1iySYl1kTFdEMdW7QDYEOSNDsvJEhpj-o=w1280"  role="img">
+</div>
 
+<div id="page">
+
+<p>I consult on and develop applications and websites with a focus on open-source, reusable code to provide outstanding user experience.</p>
+<p>I've developed using assembly through high level languages including C and PHP. Previous roles include systems programmer, UNIX/Linux systems administrator, network manager, database developer and administrator, application developer, technical leader and manager. I'm a strong advocate for collaborative, open-source solutions.  </p>
+
+<h2>Experience </h2>
+
+<h3>University of California, Irvine</h3>
+<ul>
+<li> Director of Computing, Samueli School of Engineering </li>
+<li> Computing Support Manager, Information and Computer Science </li>
+<li> Network Manager, Information and Computer Science </li>
+</ul>
+
+<h3> Northrop Grumman Corporation, Research &amp; Technology Center</h3>
+<ul>
+<li> Research Technical Staff, parallel processing computer systems, Rancho Palos Verdes, CA, </li>
+</ul>
+
+<h3> Citigroup, Transaction Technology Inc</h3>
+<ul>
+<li> Unix System Administrator, Santa Monica, CA </li>
+</ul>
+
+<h2> Education </h2>
+
+<h3>
+California State University, Fullerton
+</h3>
+<ul>
+<li> Computer Science </li>
+</ul>
+
+<h3> University of California, Irvine </h3>
+<ul>
+<li> Electrical Engineering </li>
+</ul>
+
+<h2>
+Links
+</h2>
+<ul>
+<li> <a  href="https://www.linkedin.com/in/jromine" target="_blank" > LinkedIn </a> </li>
+<li> <a  href="https://twitter.com/johnromine" target="_blank" > Twitter </a> </li>
+<li> <a  href="https://www.drupal.org/u/jromine" target="_blank" > Drupal </a> </li>
+<li> <a  href="https://backdropcms.org/account/jromine" target="_blank" > Backdrop </a> </li>
+<li> <a  href="http://drupalcampla.com/users/jromine" target="_blank" > DrupalCamp Los Angeles </a> </li>
+<li> <a  href="https://github.com/jromine" target="_blank" > GitHub </a> </li>
+</ul>
+
+
+</div><!-- page --->
 </html>

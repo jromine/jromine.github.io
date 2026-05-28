@@ -42,14 +42,22 @@
     	p {
 		font-family: Times New Roman, serif;
 	}
+@media only screen and (max-width: 600px) {
+    .img {
+      width: 100px;
+      max-width: 100px;
+      height: auto;
+      padding-right: 10px;
+    }
+}
 </style>
 </head>
 <body>
 
 <h1>John Romine </h1>
 
-<div style="float: right; width: 300px; padding-left: 20px;">
-<img width=300 src="images/headshot.jpg"  role="img">
+<div class="img" style="float: right; width: 300px; padding-left: 20px;">
+<img class="img" style="width: 300px;" src="images/headshot.jpg"  role="img">
 </div>
 
 <div id="page">
